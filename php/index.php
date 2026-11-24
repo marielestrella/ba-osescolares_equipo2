@@ -1,235 +1,647 @@
 <?php
-// Enlaza la conexión desde la carpeta config
-require_once '../config/conexion.php';
+// Enlaza la conexión desde la carpeta config (opcional si usas solo archivos .txt)
+// require_once '../config/conexion.php';
+
+date_default_timezone_set('America/Mexico_City');
+$mensaje = "";
+$tipoMensaje = "";
+
+$rutaEnviados   = __DIR__ . DIRECTORY_SEPARATOR . "reportes.txt";
+$rutaArchivados = __DIR__ . DIRECTORY_SEPARATOR . "reportes_archivados.txt";
+
+// Variables para cuando se presiona "Actualizar"
+$editando        = false;
+$editIndex       = -1;
+$editOrigen      = "";
+$editUbicacion   = "";
+$editTipoBano    = "Hombres";
+$editTipoFalla   = "";
+$editDescripcion = "";
+
+// Leer bloques de reportes separados por --------------------------
+function obtenerReportes($ruta) {
+    if (!file_exists($ruta)) {
+        return [];
+    }
+    $contenido = trim(file_get_contents($ruta));
+    if (empty($contenido)) {
+        return [];
+    }
+    $bloques = explode("--------------------------", $contenido);
+    $lista = [];
+    foreach ($bloques as $bloque) {
+        $bloque = trim($bloque);
+        if (!empty($bloque)) {
+            $lista[] = $bloque;
+        }
+    }
+    return $lista;
+}
+
+// Guardar la lista actualizada en el .txt
+function guardarListaReportes($ruta, $lista) {
+    $textoFinal = "";
+    foreach ($lista as $item) {
+        $textoFinal .= trim($item) . PHP_EOL . "--------------------------" . PHP_EOL;
+    }
+    return @file_put_contents($ruta, $textoFinal, LOCK_EX) !== false;
+}
+
+// Extraer cada dato de un bloque de texto para editarlo
+function extraerDatos($textoBloque) {
+    $datos = [
+        "fecha" => date("d/m/Y H:i:s"),
+        "ubicacion" => "",
+        "tipo_bano" => "Hombres",
+        "tipo_falla" => "",
+        "descripcion" => ""
+    ];
+    $lineas = explode("\n", str_replace("\r", "", $textoBloque));
+    $leyendoDesc = false;
+
+    foreach ($lineas as $linea) {
+        if (strpos($linea, "Fecha: ") === 0) {
+            $datos["fecha"] = trim(substr($linea, 7));
+        } elseif (strpos($linea, "Ubicación: ") === 0) {
+            $datos["ubicacion"] = trim(substr($linea, 12));
+        } elseif (strpos($linea, "Tipo de baño: ") === 0) {
+            $datos["tipo_bano"] = trim(substr($linea, 15));
+        } elseif (strpos($linea, "Tipo de falla: ") === 0) {
+            $datos["tipo_falla"] = trim(substr($linea, 15));
+        } elseif (strpos($linea, "Descripción: ") === 0) {
+            $datos["descripcion"] = trim(substr($linea, 14));
+            $leyendoDesc = true;
+        } elseif ($leyendoDesc) {
+            $datos["descripcion"] .= "\n" . $linea;
+        }
+    }
+    return $datos;
+}
+
+// ==========================================
+// PROCESAR ACCIONES (CREAR, ELIMINAR, EDITAR, ACTUALIZAR)
+// ==========================================
+if ($_SERVER["REQUEST_METHOD"] == "POST") {
+    $accion = trim($_POST["accion"] ?? "enviar");
+
+    // 1. ELIMINAR UN REPORTE
+    if ($accion === "eliminar") {
+        $origen = $_POST["origen"] ?? "";
+        $indice = intval($_POST["indice"] ?? -1);
+        $archivo = ($origen === "archivados") ? $rutaArchivados : $rutaEnviados;
+
+        $lista = obtenerReportes($archivo);
+        if (isset($lista[$indice])) {
+            unset($lista[$indice]);
+            if (guardarListaReportes($archivo, $lista)) {
+                $mensaje = "Reporte ELIMINADO correctamente.";
+                $tipoMensaje = "exito";
+            } else {
+                $mensaje = "Error al eliminar el reporte. Verifica permisos.";
+                $tipoMensaje = "error";
+            }
+        }
+    }
+    // 2. CARGAR DATOS EN EL FORMULARIO PARA EDITAR
+    elseif ($accion === "cargar_edicion") {
+        $origen = $_POST["origen"] ?? "";
+        $indice = intval($_POST["indice"] ?? -1);
+        $archivo = ($origen === "archivados") ? $rutaArchivados : $rutaEnviados;
+
+        $lista = obtenerReportes($archivo);
+        if (isset($lista[$indice])) {
+            $datos = extraerDatos($lista[$indice]);
+            $editando        = true;
+            $editIndex       = $indice;
+            $editOrigen      = $origen;
+            $editUbicacion   = $datos["ubicacion"];
+            $editTipoBano    = $datos["tipo_bano"];
+            $editTipoFalla   = $datos["tipo_falla"];
+            $editDescripcion = $datos["descripcion"];
+            $mensaje = "Modo edición activado. Modifica los datos arriba y guarda los cambios.";
+            $tipoMensaje = "exito";
+        }
+    }
+    // 3. GUARDAR ACTUALIZACIÓN DE UN REPORTE EXISTENTE
+    elseif ($accion === "actualizar") {
+        $origen      = $_POST["origen"] ?? "";
+        $indice      = intval($_POST["indice"] ?? -1);
+        $ubicacion   = htmlspecialchars(trim($_POST["ubicacion"] ?? ""));
+        $tipoBano    = htmlspecialchars(trim($_POST["tipo_bano"] ?? ""));
+        $tipoFalla   = htmlspecialchars(trim($_POST["tipo_falla"] ?? ""));
+        $descripcion = htmlspecialchars(trim($_POST["descripcion"] ?? ""));
+
+        if (empty($ubicacion) || empty($tipoBano) || empty($tipoFalla) || empty($descripcion)) {
+            $mensaje = "Por favor, completa todos los campos para actualizar.";
+            $tipoMensaje = "error";
+        } else {
+            $archivo = ($origen === "archivados") ? $rutaArchivados : $rutaEnviados;
+            $lista = obtenerReportes($archivo);
+
+            if (isset($lista[$indice])) {
+                $reporteActualizado  = "Fecha: " . date("d/m/Y H:i:s") . " (Editado)" . PHP_EOL;
+                $reporteActualizado .= "Ubicación: " . $ubicacion . PHP_EOL;
+                $reporteActualizado .= "Tipo de baño: " . $tipoBano . PHP_EOL;
+                $reporteActualizado .= "Tipo de falla: " . $tipoFalla . PHP_EOL;
+                $reporteActualizado .= "Descripción: " . $descripcion;
+
+                $lista[$indice] = $reporteActualizado;
+
+                if (guardarListaReportes($archivo, $lista)) {
+                    $mensaje = "Reporte ACTUALIZADO correctamente.";
+                    $tipoMensaje = "exito";
+                } else {
+                    $mensaje = "No se pudo actualizar el reporte. Verifica permisos.";
+                    $tipoMensaje = "error";
+                }
+            }
+        }
+    }
+    // 4. CREAR NUEVO REPORTE (ENVIAR O ARCHIVAR)
+    else {
+        $ubicacion   = htmlspecialchars(trim($_POST["ubicacion"] ?? ""));
+        $tipoBano    = htmlspecialchars(trim($_POST["tipo_bano"] ?? ""));
+        $tipoFalla   = htmlspecialchars(trim($_POST["tipo_falla"] ?? ""));
+        $descripcion = htmlspecialchars(trim($_POST["descripcion"] ?? ""));
+
+        if (empty($ubicacion) || empty($tipoBano) || empty($tipoFalla) || empty($descripcion)) {
+            $mensaje = "Por favor, completa todos los campos.";
+            $tipoMensaje = "error";
+        } else {
+            $reporte  = "Fecha: " . date("d/m/Y H:i:s") . PHP_EOL;
+            $reporte .= "Ubicación: " . $ubicacion . PHP_EOL;
+            $reporte .= "Tipo de baño: " . $tipoBano . PHP_EOL;
+            $reporte .= "Tipo de falla: " . $tipoFalla . PHP_EOL;
+            $reporte .= "Descripción: " . $descripcion . PHP_EOL;
+            $reporte .= "--------------------------" . PHP_EOL;
+
+            if ($accion === "archivar") {
+                $archivo = $rutaArchivados;
+                $textoExito = "Reporte ARCHIVADO correctamente en reportes_archivados.txt";
+            } else {
+                $archivo = $rutaEnviados;
+                $textoExito = "Reporte ENVIADO correctamente en reportes.txt";
+            }
+
+            if (@file_put_contents($archivo, $reporte, FILE_APPEND + LOCK_EX) !== false) {
+                $mensaje = $textoExito;
+                $tipoMensaje = "exito";
+            } else {
+                $mensaje = "No se pudo guardar el reporte. Verifica permisos de la carpeta.";
+                $tipoMensaje = "error";
+            }
+        }
+    }
+}
+
+// ==========================================
+// CONSULTAR / FILTRAR REPORTES (GET)
+// ==========================================
+$busqueda = trim($_GET["buscar"] ?? "");
+$filtroArchivo = $_GET["filtro"] ?? "todos";
+
+$listaEnviados   = obtenerReportes($rutaEnviados);
+$listaArchivados = obtenerReportes($rutaArchivados);
 ?>
 <!DOCTYPE html>
 <html lang="es">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Expediente de Fallas - Baños Escolares</title>
+    <title>Reporte de Fallas - Baños Escolares</title>
     <style>
-        * { 
-            box-sizing: border-box; 
-            font-family: 'Courier New', Courier, monospace, system-ui; 
+        * {
+            box-sizing: border-box;
+            font-family: 'Courier New', Courier, monospace;
         }
 
-        body { 
+        body {
             background-color: #070709;
-            background-image: 
-                radial-gradient(circle at 15% 20%, rgba(153, 0, 0, 0.25) 0%, transparent 45%),
-                radial-gradient(circle at 85% 80%, rgba(120, 0, 0, 0.3) 0%, transparent 50%);
-            margin: 0; 
-            padding: 2rem; 
+            background-image:
+                radial-gradient(circle at 15% 20%, rgba(153, 0, 0, 0.25), transparent 45%),
+                radial-gradient(circle at 85% 80%, rgba(120, 0, 0, 0.3), transparent 50%);
+            margin: 0;
+            padding: 2rem 1rem;
             color: #e2e8f0;
             min-height: 100vh;
             display: flex;
+            flex-direction: column;
             align-items: center;
-            justify-content: center;
-            position: relative;
-            overflow-x: hidden;
+            justify-content: flex-start;
+            overflow-y: auto;
         }
 
-        /* Salpicaduras de sangre en el fondo */
-        .sangre-bg {
-            position: fixed;
-            top: 0;
-            left: 0;
+        .contenedor {
             width: 100%;
-            height: 100%;
-            pointer-events: none;
-            z-index: 0;
-            opacity: 0.55;
-        }
-
-        /* Efecto Portaobjetos de Vidrio (Blood Slide) */
-        .contenedor { 
-            position: relative;
-            z-index: 1;
-            width: 100%;
-            max-width: 600px; 
-            margin: 0 auto; 
-            /* Vidrio translúcido oscuro con tinte carmesí */
-            background: linear-gradient(135deg, rgba(22, 22, 26, 0.78) 0%, rgba(45, 5, 10, 0.65) 100%);
+            max-width: 650px;
+            margin: 0 auto 2rem auto;
+            padding: 2.5rem 2rem;
+            background: linear-gradient(135deg, rgba(22, 22, 26, 0.78), rgba(45, 5, 10, 0.65));
             backdrop-filter: blur(12px);
-            -webkit-backdrop-filter: blur(12px);
-            padding: 2.5rem 2rem; 
-            border-radius: 6px; 
-            /* Borde biselado tipo cristal de laboratorio */
             border: 1px solid rgba(220, 38, 38, 0.45);
-            border-top: 2px solid rgba(255, 255, 255, 0.25);
-            border-left: 2px solid rgba(255, 255, 255, 0.15);
-            box-shadow: 
-                0 20px 50px rgba(0, 0, 0, 0.9),
-                inset 0 0 25px rgba(185, 28, 28, 0.25);
+            border-radius: 6px;
+            box-shadow: 0 20px 50px rgba(0, 0, 0, 0.9), inset 0 0 25px rgba(185, 28, 28, 0.25);
         }
 
-        /* Gota de sangre central decorativa estilo muestra de laboratorio */
         .muestra-vidrio {
             width: 36px;
             height: 36px;
-            margin: 0 auto 1rem auto;
-            background: radial-gradient(circle at 35% 35%, #ef4444, #991b1b 60%, #450a0a 100%);
-            border-radius: 50% 50% 50% 50% / 60% 60% 40% 40%;
-            box-shadow: 0 0 15px rgba(220, 38, 38, 0.8), inset 0 2px 4px rgba(255,255,255,0.4);
-            transform: rotate(-15deg);
+            margin: 0 auto 1rem;
+            background: radial-gradient(circle at 35% 35%, #ef4444, #991b1b 60%, #450a0a);
+            border-radius: 50%;
+            box-shadow: 0 0 15px rgba(220, 38, 38, 0.8);
         }
 
-        h1 { 
-            margin-top: 0; 
-            color: #f8fafc; 
-            font-size: 1.4rem; 
+        h1, h2 {
+            color: #f8fafc;
             text-align: center;
             text-transform: uppercase;
             letter-spacing: 2px;
             border-bottom: 1px solid rgba(220, 38, 38, 0.5);
             padding-bottom: 0.8rem;
-            text-shadow: 0 0 10px rgba(220, 38, 38, 0.7);
         }
+
+        h1 { font-size: 1.4rem; }
+        h2 { font-size: 1.1rem; margin-top: 0; }
 
         .subtitulo-forense {
             text-align: center;
             font-size: 0.75rem;
             color: #ef4444;
             letter-spacing: 3px;
-            margin-top: -0.4rem;
             margin-bottom: 1.5rem;
             text-transform: uppercase;
         }
 
-        .campo { 
-            margin-bottom: 1.2rem; 
+        .campo {
+            margin-bottom: 1.2rem;
         }
 
-        label { 
-            display: block; 
-            font-weight: 700; 
-            margin-bottom: 0.4rem; 
+        label {
+            display: block;
+            font-weight: 700;
+            margin-bottom: 0.4rem;
             color: #fca5a5;
             font-size: 0.9rem;
             text-transform: uppercase;
-            letter-spacing: 1px;
         }
 
-        input, select, textarea { 
-            width: 100%; 
-            padding: 0.75rem; 
+        input, select, textarea {
+            width: 100%;
+            padding: 0.75rem;
             background-color: rgba(10, 10, 12, 0.85);
             color: #f1f5f9;
-            border: 1px solid rgba(153, 27, 27, 0.6); 
-            border-radius: 4px; 
+            border: 1px solid rgba(153, 27, 27, 0.6);
+            border-radius: 4px;
             font-size: 0.95rem;
-            transition: all 0.25s ease;
         }
 
-        input::placeholder, textarea::placeholder {
-            color: #64748b;
+        textarea {
+            resize: vertical;
         }
 
         input:focus, select:focus, textarea:focus {
             outline: none;
             border-color: #ef4444;
             box-shadow: 0 0 12px rgba(220, 38, 38, 0.45);
-            background-color: rgba(18, 12, 14, 0.95);
         }
 
-        select option {
-            background-color: #111115;
-            color: #f1f5f9;
+        .grupo-botones {
+            margin-top: 1.5rem;
+            display: flex;
+            flex-direction: column;
+            gap: 0.75rem;
         }
 
-        button { 
-            width: 100%; 
-            padding: 0.9rem; 
-            margin-top: 0.5rem;
-            background: linear-gradient(180deg, #b91c1c 0%, #7f1d1d 100%);
-            color: #ffffff; 
-            border: 1px solid #ef4444; 
-            border-radius: 4px; 
-            font-size: 1rem; 
-            font-weight: 700; 
+        button, .btn-link {
+            width: 100%;
+            padding: 0.9rem;
+            background: linear-gradient(180deg, #b91c1c, #7f1d1d);
+            color: white;
+            border: 1px solid #ef4444;
+            border-radius: 4px;
+            font-size: 1rem;
+            font-weight: 700;
             text-transform: uppercase;
             letter-spacing: 2px;
-            cursor: pointer; 
-            box-shadow: 0 4px 15px rgba(185, 28, 28, 0.4);
-            transition: all 0.25s ease;
+            cursor: pointer;
+            text-align: center;
+            text-decoration: none;
+            display: inline-block;
         }
 
-        button:hover { 
-            background: linear-gradient(180deg, #dc2626 0%, #991b1b 100%);
-            box-shadow: 0 0 20px rgba(239, 68, 68, 0.75);
-            transform: translateY(-1px);
+        button:hover, .btn-link:hover {
+            background: linear-gradient(180deg, #dc2626, #991b1b);
         }
 
-        button:active {
-            transform: translateY(1px);
+        .btn-actualizar {
+            background: linear-gradient(180deg, #d97706, #92400e);
+            border-color: #f59e0b;
+        }
+
+        .btn-actualizar:hover {
+            background: linear-gradient(180deg, #f59e0b, #b45309);
+        }
+
+        .btn-secundario {
+            background: rgba(30, 41, 59, 0.9);
+            border-color: #64748b;
+            font-size: 0.85rem;
+            padding: 0.7rem;
+        }
+
+        .btn-secundario:hover {
+            background: rgba(51, 65, 85, 0.9);
+        }
+
+        .mensaje {
+            padding: 12px;
+            margin-bottom: 15px;
+            text-align: center;
+            border-radius: 5px;
+            font-weight: bold;
+        }
+
+        .exito {
+            background: #14532d;
+            color: #bbf7d0;
+            border: 1px solid #22c55e;
+        }
+
+        .error {
+            background: #7f1d1d;
+            color: #fecaca;
+            border: 1px solid #ef4444;
+        }
+
+        .caja-registros {
+            background-color: rgba(10, 10, 12, 0.9);
+            border: 1px solid rgba(153, 27, 27, 0.6);
+            border-radius: 4px;
+            padding: 1rem;
+            max-height: 380px;
+            overflow-y: auto;
+            font-size: 0.85rem;
+            color: #cbd5e1;
+            line-height: 1.5;
+        }
+
+        .tarjeta-reporte {
+            background-color: rgba(24, 24, 29, 0.95);
+            border-left: 3px solid #ef4444;
+            padding: 0.8rem;
+            margin-bottom: 0.9rem;
+            border-radius: 4px;
+        }
+
+        .texto-reporte {
+            white-space: pre-wrap;
+            margin-bottom: 0.7rem;
+        }
+
+        .acciones-item {
+            display: flex;
+            gap: 0.5rem;
+        }
+
+        .acciones-item form {
+            flex: 1;
+        }
+
+        .btn-mini {
+            padding: 0.45rem 0.6rem;
+            font-size: 0.75rem;
+            letter-spacing: 1px;
+        }
+
+        .btn-mini-editar {
+            background: #b45309;
+            border-color: #f59e0b;
+        }
+
+        .btn-mini-editar:hover {
+            background: #d97706;
+        }
+
+        .fila-consulta {
+            display: flex;
+            gap: 0.5rem;
+            margin-bottom: 0.8rem;
+        }
+
+        .fila-consulta input {
+            flex: 2;
+        }
+
+        .fila-consulta select {
+            flex: 1;
+        }
+
+        .vacio {
+            color: #64748b;
+            font-style: italic;
+            text-align: center;
+            padding: 1rem 0;
+        }
+
+        @media (max-width: 500px) {
+            body { padding: 1rem; }
+            .contenedor { padding: 1.5rem 1rem; }
+            .fila-consulta { flex-direction: column; }
         }
     </style>
 </head>
 <body>
-    <!-- Salpicaduras SVG estilo análisis forense -->
-    <svg class="sangre-bg" viewBox="0 0 1440 900" preserveAspectRatio="xMidYMid slice" xmlns="http://www.w3.org/2000/svg">
-        <g fill="#880808">
-            <circle cx="180" cy="140" r="28" />
-            <circle cx="220" cy="110" r="9" />
-            <circle cx="150" cy="185" r="12" />
-            <circle cx="245" cy="165" r="5" />
-            <path d="M180 140 Q185 230 178 290 Q175 305 182 305 Q188 305 185 285 Q182 220 192 145 Z" />
-            
-            <circle cx="1220" cy="680" r="45" />
-            <circle cx="1160" cy="630" r="14" />
-            <circle cx="1280" cy="620" r="10" />
-            <circle cx="1250" cy="750" r="18" />
-            <circle cx="1130" cy="710" r="7" />
-            <path d="M1220 680 Q1225 790 1218 880 L1226 880 Q1228 780 1232 680 Z" />
 
-            <circle cx="1100" cy="160" r="16" />
-            <circle cx="1135" cy="185" r="6" />
-            <circle cx="310" cy="740" r="22" />
-            <circle cx="345" cy="770" r="8" />
-        </g>
-    </svg>
+<!-- FORMULARIO PRINCIPAL (CREAR Y ACTUALIZAR) -->
+<div class="contenedor">
+    <div class="muestra-vidrio"></div>
+    <h1><?php echo $editando ? "Actualizar Reporte" : "Reporte de Fallas"; ?></h1>
+    <div class="subtitulo-forense">Baños Escolares // Bay Harbor Lab</div>
 
-    <div class="contenedor">
-        <div class="muestra-vidrio" title="Muestra #001"></div>
-        <h1>Reporte de Fallas</h1>
-        <div class="subtitulo-forense">Baños Escolares // Bay Harbor Lab</div>
-        
-        <form action="" method="POST">
-            <div class="campo">
-                <label for="ubicacion">Ubicación / Edificio:</label>
-                <input type="text" id="ubicacion" name="ubicacion" placeholder="Ej. Edificio B, Planta Baja" required>
-            </div>
-            <div class="campo">
-                <label for="tipo_bano">Tipo de baño:</label>
-                <select id="tipo_bano" name="tipo_bano" required>
-                    <option value="">Selecciona una opción...</option>
-                    <option value="Hombres">Hombres</option>
-                    <option value="Mujeres">Mujeres</option>
-                    <option value="Docentes">Docentes / Mixto</option>
-                </select>
-            </div>
-            <div class="campo">
-                <label for="falla">Tipo de falla:</label>
-                <select id="falla" name="falla" required>
-                    <option value="">Selecciona el problema...</option>
-                    <option value="Fuga de agua">Fuga de agua</option>
-                    <option value="WC tapado o dañado">WC tapado o dañado</option>
-                    <option value="Lavabo sin agua">Lavabo sin agua</option>
-                    <option value="Falta de insumos">Falta de papel / jabón</option>
-                    <option value="Puerta o cerradura">Puerta o cerradura dañada</option>
-                    <option value="Otro">Otro</option>
-                </select>
-            </div>
-            <div class="campo">
-                <label for="descripcion">Descripción detallada:</label>
-                <textarea id="descripcion" name="descripcion" rows="3" placeholder="Describe brevemente la evidencia de la falla..." required></textarea>
-            </div>
-            <button type="submit">Archivar Reporte</button>
-        </form>
-    </div>
+    <?php if (!empty($mensaje)): ?>
+        <div class="mensaje <?php echo $tipoMensaje; ?>">
+            <?php echo $mensaje; ?>
+        </div>
+    <?php endif; ?>
 
-    <!-- Enlaza el archivo de validaciones de la carpeta js -->
-    <script src="../js/validaciones.js"></script>
+    <form id="formReporte" method="POST" action="index.php">
+        <input type="hidden" id="accion" name="accion" value="<?php echo $editando ? 'actualizar' : 'enviar'; ?>">
+        <?php if ($editando): ?>
+            <input type="hidden" name="indice" value="<?php echo $editIndex; ?>">
+            <input type="hidden" name="origen" value="<?php echo htmlspecialchars($editOrigen); ?>">
+        <?php endif; ?>
+
+        <div class="campo">
+            <label for="ubicacion">Ubicación / Edificio:</label>
+            <input
+                type="text"
+                id="ubicacion"
+                name="ubicacion"
+                placeholder="Ej. Edificio F planta baja"
+                value="<?php echo htmlspecialchars($editUbicacion); ?>"
+                required
+            >
+        </div>
+
+        <div class="campo">
+            <label for="tipo_bano">Tipo de baño:</label>
+            <select id="tipo_bano" name="tipo_bano" required>
+                <option value="Hombres" <?php echo ($editTipoBano === "Hombres") ? "selected" : ""; ?>>Hombres</option>
+                <option value="Mujeres" <?php echo ($editTipoBano === "Mujeres") ? "selected" : ""; ?>>Mujeres</option>
+                <option value="Mixto / Docentes" <?php echo ($editTipoBano === "Mixto / Docentes") ? "selected" : ""; ?>>Mixto / Docentes</option>
+            </select>
+        </div>
+
+        <div class="campo">
+            <label for="tipo_falla">Tipo de falla:</label>
+            <select id="tipo_falla" name="tipo_falla" required>
+                <option value="" disabled <?php echo empty($editTipoFalla) ? "selected" : ""; ?>>Selecciona el problema...</option>
+                <option value="Fuga de agua" <?php echo ($editTipoFalla === "Fuga de agua") ? "selected" : ""; ?>>Fuga de agua</option>
+                <option value="Inodoro obstruido" <?php echo ($editTipoFalla === "Inodoro obstruido") ? "selected" : ""; ?>>Inodoro obstruido</option>
+                <option value="Lavabo dañado" <?php echo ($editTipoFalla === "Lavabo dañado") ? "selected" : ""; ?>>Lavabo dañado</option>
+                <option value="Falta de insumos" <?php echo ($editTipoFalla === "Falta de insumos") ? "selected" : ""; ?>>Falta de insumos</option>
+                <option value="Iluminación o puerta dañada" <?php echo ($editTipoFalla === "Iluminación o puerta dañada") ? "selected" : ""; ?>>Iluminación o puerta dañada</option>
+                <option value="Otro" <?php echo ($editTipoFalla === "Otro") ? "selected" : ""; ?>>Otro</option>
+            </select>
+        </div>
+
+        <div class="campo">
+            <label for="descripcion">Descripción detallada:</label>
+            <textarea
+                id="descripcion"
+                name="descripcion"
+                rows="4"
+                placeholder="Describe brevemente la evidencia de la falla..."
+                required
+            ><?php echo htmlspecialchars($editDescripcion); ?></textarea>
+        </div>
+
+        <div class="grupo-botones">
+            <?php if ($editando): ?>
+                <button type="submit" class="btn-actualizar">
+                    Guardar Cambios
+                </button>
+                <a href="index.php" class="btn-link btn-secundario">Cancelar Edición</a>
+            <?php else: ?>
+                <button type="submit" onclick="document.getElementById('accion').value='enviar'">
+                    Enviar Reporte
+                </button>
+                <button type="submit" onclick="document.getElementById('accion').value='archivar'">
+                    Archivar Reporte
+                </button>
+            <?php endif; ?>
+        </div>
+    </form>
+</div>
+
+<!-- SECCIÓN PARA CONSULTAR, ACTUALIZAR Y ELIMINAR REPORTES -->
+<div class="contenedor">
+    <h2>Bitácora de Evidencias Guardadas</h2>
+
+    <!-- BARRA DE CONSULTA / BÚSQUEDA -->
+    <form method="GET" action="index.php" class="campo">
+        <label for="buscar">Consultar / Filtrar Reportes:</label>
+        <div class="fila-consulta">
+            <input
+                type="text"
+                id="buscar"
+                name="buscar"
+                placeholder="Buscar edificio, falla, fecha..."
+                value="<?php echo htmlspecialchars($busqueda); ?>"
+            >
+            <select name="filtro">
+                <option value="todos" <?php echo ($filtroArchivo === "todos") ? "selected" : ""; ?>>Todos</option>
+                <option value="enviados" <?php echo ($filtroArchivo === "enviados") ? "selected" : ""; ?>>Solo Enviados</option>
+                <option value="archivados" <?php echo ($filtroArchivo === "archivados") ? "selected" : ""; ?>>Solo Archivados</option>
+            </select>
+        </div>
+        <div class="fila-consulta">
+            <button type="submit" class="btn-mini">Consultar</button>
+            <?php if (!empty($busqueda) || $filtroArchivo !== "todos"): ?>
+                <a href="index.php" class="btn-link btn-secundario btn-mini">Limpiar Filtro</a>
+            <?php endif; ?>
+        </div>
+    </form>
+
+    <!-- LISTA DE REPORTES ENVIADOS -->
+    <?php if ($filtroArchivo === "todos" || $filtroArchivo === "enviados"): ?>
+        <div class="campo">
+            <label>Reportes Enviados (reportes.txt):</label>
+            <div class="caja-registros">
+                <?php
+                $encontradosEnv = 0;
+                foreach ($listaEnviados as $indice => $rep):
+                    if (!empty($busqueda) && stripos($rep, $busqueda) === false) {
+                        continue;
+                    }
+                    $encontradosEnv++;
+                ?>
+                    <div class="tarjeta-reporte">
+                        <div class="texto-reporte"><?php echo htmlspecialchars($rep); ?></div>
+                        <div class="acciones-item">
+                            <form method="POST" action="index.php">
+                                <input type="hidden" name="accion" value="cargar_edicion">
+                                <input type="hidden" name="origen" value="enviados">
+                                <input type="hidden" name="indice" value="<?php echo $indice; ?>">
+                                <button type="submit" class="btn-mini btn-mini-editar">Actualizar</button>
+                            </form>
+                            <form method="POST" action="index.php" onsubmit="return confirm('¿Seguro que deseas eliminar este reporte?');">
+                                <input type="hidden" name="accion" value="eliminar">
+                                <input type="hidden" name="origen" value="enviados">
+                                <input type="hidden" name="indice" value="<?php echo $indice; ?>">
+                                <button type="submit" class="btn-mini">Eliminar</button>
+                            </form>
+                        </div>
+                    </div>
+                <?php endforeach; ?>
+
+                <?php if ($encontradosEnv === 0): ?>
+                    <div class="vacio">No se encontraron reportes enviados.</div>
+                <?php endif; ?>
+            </div>
+        </div>
+    <?php endif; ?>
+
+    <!-- LISTA DE REPORTES ARCHIVADOS -->
+    <?php if ($filtroArchivo === "todos" || $filtroArchivo === "archivados"): ?>
+        <div class="campo">
+            <label>Reportes Archivados (reportes_archivados.txt):</label>
+            <div class="caja-registros">
+                <?php
+                $encontradosArc = 0;
+                foreach ($listaArchivados as $indice => $rep):
+                    if (!empty($busqueda) && stripos($rep, $busqueda) === false) {
+                        continue;
+                    }
+                    $encontradosArc++;
+                ?>
+                    <div class="tarjeta-reporte">
+                        <div class="texto-reporte"><?php echo htmlspecialchars($rep); ?></div>
+                        <div class="acciones-item">
+                            <form method="POST" action="index.php">
+                                <input type="hidden" name="accion" value="cargar_edicion">
+                                <input type="hidden" name="origen" value="archivados">
+                                <input type="hidden" name="indice" value="<?php echo $indice; ?>">
+                                <button type="submit" class="btn-mini btn-mini-editar">Actualizar</button>
+                            </form>
+                            <form method="POST" action="index.php" onsubmit="return confirm('¿Seguro que deseas eliminar este reporte archivado?');">
+                                <input type="hidden" name="accion" value="eliminar">
+                                <input type="hidden" name="origen" value="archivados">
+                                <input type="hidden" name="indice" value="<?php echo $indice; ?>">
+                                <button type="submit" class="btn-mini">Eliminar</button>
+                            </form>
+                        </div>
+                    </div>
+                <?php endforeach; ?>
+
+                <?php if ($encontradosArc === 0): ?>
+                    <div class="vacio">No se encontraron reportes archivados.</div>
+                <?php endif; ?>
+            </div>
+        </div>
+    <?php endif; ?>
+</div>
+
 </body>
 </html>
