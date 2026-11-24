@@ -6,7 +6,7 @@ $tipoMensaje = "";
 $rutaEnviados   = __DIR__ . DIRECTORY_SEPARATOR . "reportes.txt";
 $rutaArchivados = __DIR__ . DIRECTORY_SEPARATOR . "reportes_archivados.txt";
 
-// Variables para cuando se activa el modo edición (Actualizar)
+// Variables para cuando se presiona "Actualizar"
 $editando        = false;
 $editIndex       = -1;
 $editOrigen      = "";
@@ -15,76 +15,38 @@ $editTipoBano    = "Hombres";
 $editTipoFalla   = "";
 $editDescripcion = "";
 
-// 1. Leer los reportes del .txt y separarlos en una lista usando la línea de guiones
+// Leer los reportes del .txt y separarlos usando --------------------------
 function obtenerReportes($ruta) {
-    if (!file_exists($ruta)) {
-        return [];
-    }
+    if (!file_exists($ruta)) return [];
     $contenido = trim(file_get_contents($ruta));
-    if (empty($contenido)) {
-        return [];
-    }
+    if (empty($contenido)) return [];
     $bloques = explode("--------------------------", $contenido);
     $lista = [];
-    foreach ($bloques as $bloque) {
-        $bloque = trim($bloque);
-        if (!empty($bloque)) {
-            $lista[] = $bloque;
-        }
+    foreach ($bloques as $b) {
+        if (!empty(trim($b))) $lista[] = trim($b);
     }
     return $lista;
 }
 
-// 2. Guardar de nuevo la lista completa en el archivo .txt
+// Guardar la lista completa de reportes de vuelta en el .txt
 function guardarListaReportes($ruta, $lista) {
-    $textoFinal = "";
+    $texto = "";
     foreach ($lista as $item) {
-        $textoFinal .= trim($item) . PHP_EOL . "--------------------------" . PHP_EOL;
+        $texto .= trim($item) . PHP_EOL . "--------------------------" . PHP_EOL;
     }
-    return @file_put_contents($ruta, $textoFinal, LOCK_EX) !== false;
+    return @file_put_contents($ruta, $texto, LOCK_EX) !== false;
 }
 
-// 3. Extraer cada dato individual de un reporte para subirlo al formulario al editar
-function extraerDatos($textoBloque) {
-    $datos = [
-        "ubicacion" => "",
-        "tipo_bano" => "Hombres",
-        "tipo_falla" => "",
-        "descripcion" => ""
-    ];
-    $lineas = explode("\n", str_replace("\r", "", $textoBloque));
-    $leyendoDesc = false;
-
-    foreach ($lineas as $linea) {
-        if (strpos($linea, "Ubicación: ") === 0) {
-            $datos["ubicacion"] = trim(substr($linea, 12));
-        } elseif (strpos($linea, "Tipo de baño: ") === 0) {
-            $datos["tipo_bano"] = trim(substr($linea, 15));
-        } elseif (strpos($linea, "Tipo de falla: ") === 0) {
-            $datos["tipo_falla"] = trim(substr($linea, 15));
-        } elseif (strpos($linea, "Descripción: ") === 0) {
-            $datos["descripcion"] = trim(substr($linea, 14));
-            $leyendoDesc = true;
-        } elseif ($leyendoDesc) {
-            $datos["descripcion"] .= "\n" . $linea;
-        }
-    }
-    return $datos;
-}
-
-// ==========================================
-// PROCESAR FORMULARIOS (CREAR, ELIMINAR, EDITAR, ACTUALIZAR)
-// ==========================================
 if ($_SERVER["REQUEST_METHOD"] == "POST") {
     $accion = trim($_POST["accion"] ?? "enviar");
 
-    // ACCIÓN: ELIMINAR
+    // 1. ELIMINAR REPORTE
     if ($accion === "eliminar") {
-        $origen = $_POST["origen"] ?? "";
-        $indice = intval($_POST["indice"] ?? -1);
+        $origen  = $_POST["origen"] ?? "";
+        $indice  = intval($_POST["indice"] ?? -1);
         $archivo = ($origen === "archivados") ? $rutaArchivados : $rutaEnviados;
+        $lista   = obtenerReportes($archivo);
 
-        $lista = obtenerReportes($archivo);
         if (isset($lista[$indice])) {
             unset($lista[$indice]);
             if (guardarListaReportes($archivo, $lista)) {
@@ -96,27 +58,31 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
             }
         }
     }
-    // ACCIÓN: CARGAR DATOS PARA ACTUALIZAR
+    // 2. CARGAR DATOS AL FORMULARIO PARA ACTUALIZAR
     elseif ($accion === "cargar_edicion") {
-        $origen = $_POST["origen"] ?? "";
-        $indice = intval($_POST["indice"] ?? -1);
+        $origen  = $_POST["origen"] ?? "";
+        $indice  = intval($_POST["indice"] ?? -1);
         $archivo = ($origen === "archivados") ? $rutaArchivados : $rutaEnviados;
+        $lista   = obtenerReportes($archivo);
 
-        $lista = obtenerReportes($archivo);
         if (isset($lista[$indice])) {
-            $datos = extraerDatos($lista[$indice]);
-            $editando        = true;
-            $editIndex       = $indice;
-            $editOrigen      = $origen;
-            $editUbicacion   = $datos["ubicacion"];
-            $editTipoBano    = $datos["tipo_bano"];
-            $editTipoFalla   = $datos["tipo_falla"];
-            $editDescripcion = $datos["descripcion"];
-            $mensaje = "Editando reporte. Modifica los datos arriba y presiona Guardar Cambios.";
+            $editando   = true;
+            $editIndex  = $indice;
+            $editOrigen = $origen;
+
+            // Extraer cada línea del bloque de texto
+            $lineas = explode("\n", str_replace("\r", "", $lista[$indice]));
+            foreach ($lineas as $linea) {
+                if (strpos($linea, "Ubicación: ") === 0)     $editUbicacion   = trim(substr($linea, 12));
+                if (strpos($linea, "Tipo de baño: ") === 0)  $editTipoBano    = trim(substr($linea, 15));
+                if (strpos($linea, "Tipo de falla: ") === 0) $editTipoFalla   = trim(substr($linea, 15));
+                if (strpos($linea, "Descripción: ") === 0)   $editDescripcion = trim(substr($linea, 14));
+            }
+            $mensaje = "Editando reporte. Modifica los campos arriba y guarda los cambios.";
             $tipoMensaje = "exito";
         }
     }
-    // ACCIÓN: GUARDAR ACTUALIZACIÓN
+    // 3. GUARDAR ACTUALIZACIÓN
     elseif ($accion === "actualizar") {
         $origen      = $_POST["origen"] ?? "";
         $indice      = intval($_POST["indice"] ?? -1);
@@ -130,16 +96,16 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
             $tipoMensaje = "error";
         } else {
             $archivo = ($origen === "archivados") ? $rutaArchivados : $rutaEnviados;
-            $lista = obtenerReportes($archivo);
+            $lista   = obtenerReportes($archivo);
 
             if (isset($lista[$indice])) {
-                $reporteEditado  = "Fecha: " . date("d/m/Y H:i:s") . " (Editado)" . PHP_EOL;
-                $reporteEditado .= "Ubicación: " . $ubicacion . PHP_EOL;
-                $reporteEditado .= "Tipo de baño: " . $tipoBano . PHP_EOL;
-                $reporteEditado .= "Tipo de falla: " . $tipoFalla . PHP_EOL;
-                $reporteEditado .= "Descripción: " . $descripcion;
+                $reporte  = "Fecha: " . date("d/m/Y H:i:s") . " (Editado)" . PHP_EOL;
+                $reporte .= "Ubicación: " . $ubicacion . PHP_EOL;
+                $reporte .= "Tipo de baño: " . $tipoBano . PHP_EOL;
+                $reporte .= "Tipo de falla: " . $tipoFalla . PHP_EOL;
+                $reporte .= "Descripción: " . $descripcion;
 
-                $lista[$indice] = $reporteEditado;
+                $lista[$indice] = $reporte;
 
                 if (guardarListaReportes($archivo, $lista)) {
                     $mensaje = "Reporte ACTUALIZADO correctamente.";
@@ -151,7 +117,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
             }
         }
     }
-    // ACCIÓN: CREAR NUEVO REPORTE (ENVIAR O ARCHIVAR)
+    // 4. CREAR NUEVO REPORTE (ENVIAR O ARCHIVAR)
     else {
         $ubicacion   = htmlspecialchars(trim($_POST["ubicacion"] ?? ""));
         $tipoBano    = htmlspecialchars(trim($_POST["tipo_bano"] ?? ""));
@@ -162,6 +128,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
             $mensaje = "Por favor, completa todos los campos.";
             $tipoMensaje = "error";
         } else {
+
             $reporte  = "Fecha: " . date("d/m/Y H:i:s") . PHP_EOL;
             $reporte .= "Ubicación: " . $ubicacion . PHP_EOL;
             $reporte .= "Tipo de baño: " . $tipoBano . PHP_EOL;
@@ -188,12 +155,8 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
     }
 }
 
-// ==========================================
-// CONSULTAR / FILTRAR REPORTES (MÉTODO GET)
-// ==========================================
-$busqueda      = trim($_GET["buscar"] ?? "");
-$filtroArchivo = $_GET["filtro"] ?? "todos";
-
+// Leer el contenido guardado y el texto de consulta (GET)
+$busqueda        = trim($_GET["buscar"] ?? "");
 $listaEnviados   = obtenerReportes($rutaEnviados);
 $listaArchivados = obtenerReportes($rutaArchivados);
 ?>
@@ -307,7 +270,7 @@ $listaArchivados = obtenerReportes($rutaArchivados);
             gap: 0.75rem;
         }
 
-        button, .btn-link {
+        button {
             width: 100%;
             padding: 0.9rem;
             background: linear-gradient(180deg, #b91c1c, #7f1d1d);
@@ -319,33 +282,10 @@ $listaArchivados = obtenerReportes($rutaArchivados);
             text-transform: uppercase;
             letter-spacing: 2px;
             cursor: pointer;
-            text-align: center;
-            text-decoration: none;
-            display: inline-block;
         }
 
-        button:hover, .btn-link:hover {
+        button:hover {
             background: linear-gradient(180deg, #dc2626, #991b1b);
-        }
-
-        .btn-actualizar {
-            background: linear-gradient(180deg, #d97706, #92400e);
-            border-color: #f59e0b;
-        }
-
-        .btn-actualizar:hover {
-            background: linear-gradient(180deg, #f59e0b, #b45309);
-        }
-
-        .btn-secundario {
-            background: rgba(30, 41, 59, 0.9);
-            border-color: #64748b;
-            font-size: 0.85rem;
-            padding: 0.7rem;
-        }
-
-        .btn-secundario:hover {
-            background: rgba(51, 65, 85, 0.9);
         }
 
         .mensaje {
@@ -373,62 +313,34 @@ $listaArchivados = obtenerReportes($rutaArchivados);
             border: 1px solid rgba(153, 27, 27, 0.6);
             border-radius: 4px;
             padding: 1rem;
-            max-height: 360px;
+            max-height: 250px;
             overflow-y: auto;
+            white-space: pre-wrap;
             font-size: 0.85rem;
             color: #cbd5e1;
             line-height: 1.5;
         }
 
-        .tarjeta-reporte {
-            background-color: rgba(24, 24, 29, 0.95);
-            border-left: 3px solid #ef4444;
-            padding: 0.8rem;
-            margin-bottom: 0.9rem;
-            border-radius: 4px;
-        }
-
-        .texto-reporte {
-            white-space: pre-wrap;
-            margin-bottom: 0.7rem;
-        }
-
-        .acciones-item {
-            display: flex;
-            gap: 0.5rem;
-        }
-
-        .acciones-item form {
-            flex: 1;
-        }
-
-        .btn-mini {
-            padding: 0.45rem 0.6rem;
-            font-size: 0.75rem;
-            letter-spacing: 1px;
-        }
-
-        .btn-mini-editar {
-            background: #b45309;
-            border-color: #f59e0b;
-        }
-
-        .btn-mini-editar:hover {
-            background: #d97706;
-        }
-
-        .fila-consulta {
-            display: flex;
-            gap: 0.5rem;
+        .item-reporte {
+            border-bottom: 1px dashed rgba(220, 38, 38, 0.4);
+            padding-bottom: 0.8rem;
             margin-bottom: 0.8rem;
         }
 
-        .fila-consulta input {
-            flex: 2;
+        .acciones-fila {
+            display: flex;
+            gap: 0.5rem;
+            margin-top: 0.5rem;
         }
 
-        .fila-consulta select {
+        .acciones-fila form {
             flex: 1;
+        }
+
+        .btn-chico {
+            padding: 0.45rem;
+            font-size: 0.75rem;
+            letter-spacing: 1px;
         }
 
         .vacio {
@@ -440,7 +352,6 @@ $listaArchivados = obtenerReportes($rutaArchivados);
         @media (max-width: 500px) {
             body { padding: 1rem; }
             .contenedor { padding: 1.5rem 1rem; }
-            .fila-consulta { flex-direction: column; }
         }
     </style>
 </head>
@@ -448,7 +359,7 @@ $listaArchivados = obtenerReportes($rutaArchivados);
 
 <div class="contenedor">
     <div class="muestra-vidrio"></div>
-    <h1><?php echo $editando ? "Actualizar Reporte" : "Reporte de Fallas"; ?></h1>
+    <h1>Reporte de Fallas</h1>
     <div class="subtitulo-forense">Baños Escolares // Bay Harbor Lab</div>
 
     <?php if (!empty($mensaje)): ?>
@@ -511,10 +422,8 @@ $listaArchivados = obtenerReportes($rutaArchivados);
 
         <div class="grupo-botones">
             <?php if ($editando): ?>
-                <button type="submit" class="btn-actualizar">
-                    Guardar Cambios
-                </button>
-                <a href="?" class="btn-link btn-secundario">Cancelar Edición</a>
+                <button type="submit">Guardar Cambios</button>
+                <button type="button" onclick="window.location.href=window.location.pathname">Cancelar</button>
             <?php else: ?>
                 <button type="submit" onclick="document.getElementById('accion').value='enviar'">
                     Enviar Reporte
@@ -532,106 +441,74 @@ $listaArchivados = obtenerReportes($rutaArchivados);
 <div class="contenedor">
     <h2>Bitácora de Evidencias Guardadas</h2>
 
-    <!-- CONSULTA / BUSCADOR -->
     <form method="GET" class="campo">
-        <label for="buscar">Consultar Reportes:</label>
-        <div class="fila-consulta">
+        <label for="buscar">Consultar reporte:</label>
+        <div class="acciones-fila">
             <input
                 type="text"
                 id="buscar"
                 name="buscar"
-                placeholder="Buscar por edificio, falla, fecha..."
+                placeholder="Buscar edificio, falla o fecha..."
                 value="<?php echo htmlspecialchars($busqueda); ?>"
             >
-            <select name="filtro">
-                <option value="todos" <?php echo ($filtroArchivo === "todos") ? "selected" : ""; ?>>Todos</option>
-                <option value="enviados" <?php echo ($filtroArchivo === "enviados") ? "selected" : ""; ?>>Enviados</option>
-                <option value="archivados" <?php echo ($filtroArchivo === "archivados") ? "selected" : ""; ?>>Archivados</option>
-            </select>
-        </div>
-        <div class="fila-consulta">
-            <button type="submit" class="btn-mini">Consultar</button>
-            <?php if (!empty($busqueda) || $filtroArchivo !== "todos"): ?>
-                <a href="?" class="btn-link btn-secundario btn-mini">Ver Todos</a>
+            <button type="submit" class="btn-chico" style="max-width: 140px;">Consultar</button>
+            <?php if (!empty($busqueda)): ?>
+                <button type="button" class="btn-chico" style="max-width: 110px;" onclick="window.location.href=window.location.pathname">Limpiar</button>
             <?php endif; ?>
         </div>
     </form>
 
-    <?php if ($filtroArchivo === "todos" || $filtroArchivo === "enviados"): ?>
-        <div class="campo">
-            <label>Reportes Enviados (reportes.txt):</label>
-            <div class="caja-registros">
-                <?php
-                $totalEnv = 0;
-                foreach ($listaEnviados as $indice => $rep):
-                    if (!empty($busqueda) && stripos($rep, $busqueda) === false) {
-                        continue;
-                    }
-                    $totalEnv++;
-                ?>
-                    <div class="tarjeta-reporte">
-                        <div class="texto-reporte"><?php echo htmlspecialchars($rep); ?></div>
-                        <div class="acciones-item">
-                            <form method="POST">
-                                <input type="hidden" name="accion" value="cargar_edicion">
-                                <input type="hidden" name="origen" value="enviados">
-                                <input type="hidden" name="indice" value="<?php echo $indice; ?>">
-                                <button type="submit" class="btn-mini btn-mini-editar">Actualizar</button>
-                            </form>
-                            <form method="POST" onsubmit="return confirm('¿Seguro que quieres eliminar este reporte?');">
-                                <input type="hidden" name="accion" value="eliminar">
-                                <input type="hidden" name="origen" value="enviados">
-                                <input type="hidden" name="indice" value="<?php echo $indice; ?>">
-                                <button type="submit" class="btn-mini">Eliminar</button>
-                            </form>
-                        </div>
-                    </div>
-                <?php endforeach; ?>
+    <div class="campo">
+        <label>Reportes Enviados (reportes.txt):</label>
+        <div class="caja-registros"><?php
+            $hayEnv = false;
+            foreach ($listaEnviados as $indice => $rep):
+                if (!empty($busqueda) && stripos($rep, $busqueda) === false) continue;
+                $hayEnv = true;
+            ?><div class="item-reporte"><?php echo htmlspecialchars($rep); ?><div class="acciones-fila">
+                    <form method="POST">
+                        <input type="hidden" name="accion" value="cargar_edicion">
+                        <input type="hidden" name="origen" value="enviados">
+                        <input type="hidden" name="indice" value="<?php echo $indice; ?>">
+                        <button type="submit" class="btn-chico">Actualizar</button>
+                    </form>
+                    <form method="POST" onsubmit="return confirm('¿Eliminar este reporte?');">
+                        <input type="hidden" name="accion" value="eliminar">
+                        <input type="hidden" name="origen" value="enviados">
+                        <input type="hidden" name="indice" value="<?php echo $indice; ?>">
+                        <button type="submit" class="btn-chico">Eliminar</button>
+                    </form>
+                </div></div><?php
+            endforeach;
+            if (!$hayEnv) echo '<div class="vacio">Aún no hay reportes enviados.</div>';
+        ?></div>
+    </div>
 
-                <?php if ($totalEnv === 0): ?>
-                    <div class="vacio">Aún no hay reportes enviados o no coinciden con la búsqueda.</div>
-                <?php endif; ?>
-            </div>
-        </div>
-    <?php endif; ?>
-
-    <?php if ($filtroArchivo === "todos" || $filtroArchivo === "archivados"): ?>
-        <div class="campo">
-            <label>Reportes Archivados (reportes_archivados.txt):</label>
-            <div class="caja-registros">
-                <?php
-                $totalArc = 0;
-                foreach ($listaArchivados as $indice => $rep):
-                    if (!empty($busqueda) && stripos($rep, $busqueda) === false) {
-                        continue;
-                    }
-                    $totalArc++;
-                ?>
-                    <div class="tarjeta-reporte">
-                        <div class="texto-reporte"><?php echo htmlspecialchars($rep); ?></div>
-                        <div class="acciones-item">
-                            <form method="POST">
-                                <input type="hidden" name="accion" value="cargar_edicion">
-                                <input type="hidden" name="origen" value="archivados">
-                                <input type="hidden" name="indice" value="<?php echo $indice; ?>">
-                                <button type="submit" class="btn-mini btn-mini-editar">Actualizar</button>
-                            </form>
-                            <form method="POST" onsubmit="return confirm('¿Seguro que quieres eliminar este reporte archivado?');">
-                                <input type="hidden" name="accion" value="eliminar">
-                                <input type="hidden" name="origen" value="archivados">
-                                <input type="hidden" name="indice" value="<?php echo $indice; ?>">
-                                <button type="submit" class="btn-mini">Eliminar</button>
-                            </form>
-                        </div>
-                    </div>
-                <?php endforeach; ?>
-
-                <?php if ($totalArc === 0): ?>
-                    <div class="vacio">Aún no hay reportes archivados o no coinciden con la búsqueda.</div>
-                <?php endif; ?>
-            </div>
-        </div>
-    <?php endif; ?>
+    <div class="campo">
+        <label>Reportes Archivados (reportes_archivados.txt):</label>
+        <div class="caja-registros"><?php
+            $hayArc = false;
+            foreach ($listaArchivados as $indice => $rep):
+                if (!empty($busqueda) && stripos($rep, $busqueda) === false) continue;
+                $hayArc = true;
+            ?><div class="item-reporte"><?php echo htmlspecialchars($rep); ?><div class="acciones-fila">
+                    <form method="POST">
+                        <input type="hidden" name="accion" value="cargar_edicion">
+                        <input type="hidden" name="origen" value="archivados">
+                        <input type="hidden" name="indice" value="<?php echo $indice; ?>">
+                        <button type="submit" class="btn-chico">Actualizar</button>
+                    </form>
+                    <form method="POST" onsubmit="return confirm('¿Eliminar este reporte archivado?');">
+                        <input type="hidden" name="accion" value="eliminar">
+                        <input type="hidden" name="origen" value="archivados">
+                        <input type="hidden" name="indice" value="<?php echo $indice; ?>">
+                        <button type="submit" class="btn-chico">Eliminar</button>
+                    </form>
+                </div></div><?php
+            endforeach;
+            if (!$hayArc) echo '<div class="vacio">Aún no hay reportes archivados.</div>';
+        ?></div>
+    </div>
 </div>
 
 </body>
