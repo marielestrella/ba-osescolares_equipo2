@@ -1,10 +1,9 @@
 <?php
-date_default_timezone_set('America/Mexico_City');
+// Enlaza la configuración y funciones desde la carpeta config
+require_once '../config/conexion.php';
+
 $mensaje = "";
 $tipoMensaje = "";
-
-$rutaEnviados   = __DIR__ . DIRECTORY_SEPARATOR . "reportes.txt";
-$rutaArchivados = __DIR__ . DIRECTORY_SEPARATOR . "reportes_archivados.txt";
 
 // Variables para cuando se presiona "Actualizar"
 $editando        = false;
@@ -14,28 +13,6 @@ $editUbicacion   = "";
 $editTipoBano    = "Hombres";
 $editTipoFalla   = "";
 $editDescripcion = "";
-
-// Leer los reportes del .txt y separarlos usando --------------------------
-function obtenerReportes($ruta) {
-    if (!file_exists($ruta)) return [];
-    $contenido = trim(file_get_contents($ruta));
-    if (empty($contenido)) return [];
-    $bloques = explode("--------------------------", $contenido);
-    $lista = [];
-    foreach ($bloques as $b) {
-        if (!empty(trim($b))) $lista[] = trim($b);
-    }
-    return $lista;
-}
-
-// Guardar la lista completa de reportes de vuelta en el .txt
-function guardarListaReportes($ruta, $lista) {
-    $texto = "";
-    foreach ($lista as $item) {
-        $texto .= trim($item) . PHP_EOL . "--------------------------" . PHP_EOL;
-    }
-    return @file_put_contents($ruta, $texto, LOCK_EX) !== false;
-}
 
 if ($_SERVER["REQUEST_METHOD"] == "POST") {
     $accion = trim($_POST["accion"] ?? "enviar");
@@ -70,7 +47,6 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
             $editIndex  = $indice;
             $editOrigen = $origen;
 
-            // Extraer cada línea del bloque de texto
             $lineas = explode("\n", str_replace("\r", "", $lista[$indice]));
             foreach ($lineas as $linea) {
                 if (strpos($linea, "Ubicación: ") === 0)     $editUbicacion   = trim(substr($linea, 12));
@@ -128,7 +104,6 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
             $mensaje = "Por favor, completa todos los campos.";
             $tipoMensaje = "error";
         } else {
-
             $reporte  = "Fecha: " . date("d/m/Y H:i:s") . PHP_EOL;
             $reporte .= "Ubicación: " . $ubicacion . PHP_EOL;
             $reporte .= "Tipo de baño: " . $tipoBano . PHP_EOL;
@@ -425,11 +400,11 @@ $listaArchivados = obtenerReportes($rutaArchivados);
                 <button type="submit">Guardar Cambios</button>
                 <button type="button" onclick="window.location.href=window.location.pathname">Cancelar</button>
             <?php else: ?>
-                <button type="submit" onclick="document.getElementById('accion').value='enviar'">
+                <button type="submit" onclick="seleccionarAccion('enviar')">
                     Enviar Reporte
                 </button>
 
-                <button type="submit" onclick="document.getElementById('accion').value='archivar'">
+                <button type="submit" onclick="seleccionarAccion('archivar')">
                     Archivar Reporte
                 </button>
             <?php endif; ?>
@@ -472,7 +447,7 @@ $listaArchivados = obtenerReportes($rutaArchivados);
                         <input type="hidden" name="indice" value="<?php echo $indice; ?>">
                         <button type="submit" class="btn-chico">Actualizar</button>
                     </form>
-                    <form method="POST" onsubmit="return confirm('¿Eliminar este reporte?');">
+                    <form method="POST" onsubmit="return confirmarEliminacion('enviado');">
                         <input type="hidden" name="accion" value="eliminar">
                         <input type="hidden" name="origen" value="enviados">
                         <input type="hidden" name="indice" value="<?php echo $indice; ?>">
@@ -498,7 +473,7 @@ $listaArchivados = obtenerReportes($rutaArchivados);
                         <input type="hidden" name="indice" value="<?php echo $indice; ?>">
                         <button type="submit" class="btn-chico">Actualizar</button>
                     </form>
-                    <form method="POST" onsubmit="return confirm('¿Eliminar este reporte archivado?');">
+                    <form method="POST" onsubmit="return confirmarEliminacion('archivado');">
                         <input type="hidden" name="accion" value="eliminar">
                         <input type="hidden" name="origen" value="archivados">
                         <input type="hidden" name="indice" value="<?php echo $indice; ?>">
@@ -511,5 +486,7 @@ $listaArchivados = obtenerReportes($rutaArchivados);
     </div>
 </div>
 
+<!-- Enlaza las validaciones desde la carpeta js -->
+<script src="../js/validaciones.js"></script>
 </body>
 </html>
